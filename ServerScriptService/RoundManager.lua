@@ -327,25 +327,37 @@ function RoundManager.VotePhase()
 end
 
 function RoundManager.LoadMap(mapName)
-    -- Clean up previous map if exists
+    -- Clean up previous generated map if exists
     RoundManager.UnloadMap()
 
     local mapOrigin = Vector3.new(0, 0, 200)
 
-    -- Generate the map
+    -- First check if the map already exists in Workspace/Maps (custom-built map)
+    local mapsFolder = Workspace:FindFirstChild("Maps")
+    if not mapsFolder then
+        mapsFolder = Instance.new("Folder")
+        mapsFolder.Name = "Maps"
+        mapsFolder.Parent = Workspace
+    end
+
+    local existingMap = mapsFolder:FindFirstChild(mapName)
+    if existingMap then
+        -- Use the pre-built custom map! Just make it visible
+        RoundManager.CurrentMapFolder = nil -- Don't destroy custom maps
+        RoundManager.CurrentMapName = mapName
+        RoundManager.IsCustomMap = true
+        print("[RoundManager] Using custom map:", mapName)
+        return
+    end
+
+    -- No custom map found - generate one via MapGenerator
     local mapFolder = MapGenerator.GenerateMap(mapName, mapOrigin)
     if mapFolder then
-        -- Put in Workspace/Maps
-        local mapsFolder = Workspace:FindFirstChild("Maps")
-        if not mapsFolder then
-            mapsFolder = Instance.new("Folder")
-            mapsFolder.Name = "Maps"
-            mapsFolder.Parent = Workspace
-        end
         mapFolder.Parent = mapsFolder
         RoundManager.CurrentMapFolder = mapFolder
         RoundManager.CurrentMapName = mapName
-        print("[RoundManager] Map loaded:", mapName)
+        RoundManager.IsCustomMap = false
+        print("[RoundManager] Generated map:", mapName)
     else
         warn("[RoundManager] Failed to generate map:", mapName)
         RoundManager.CurrentMapName = GameConfig.DefaultMap
@@ -353,11 +365,13 @@ function RoundManager.LoadMap(mapName)
 end
 
 function RoundManager.UnloadMap()
-    if RoundManager.CurrentMapFolder and RoundManager.CurrentMapFolder.Parent then
+    -- Only destroy generated maps, NOT custom maps
+    if RoundManager.CurrentMapFolder and RoundManager.CurrentMapFolder.Parent and not RoundManager.IsCustomMap then
         RoundManager.CurrentMapFolder:Destroy()
         RoundManager.CurrentMapFolder = nil
     end
     RoundManager.CurrentMapName = nil
+    RoundManager.IsCustomMap = false
 end
 
 function RoundManager.TeleportPlayersToMap(players)
