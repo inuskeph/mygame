@@ -13,7 +13,6 @@ local PaintSystem = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChi
 
 local Events = ReplicatedStorage:WaitForChild("Events")
 local PaintCharacter = Events:WaitForChild("PaintCharacter")
-local RoundStateChanged = Events:WaitForChild("RoundStateChanged")
 local GetColorPalette = Events:WaitForChild("GetColorPalette")
 
 ----------------------------------------------------------------------
@@ -95,9 +94,6 @@ end)
 GetColorPalette.OnServerInvoke = function(player)
     return PaintSystem.GetPalette(currentMapName)
 end
-
--- Listen for round state changes to enable/disable painting
-RoundStateChanged.Event = nil -- This is fired by server, we track state locally
 
 ----------------------------------------------------------------------
 -- PUBLIC API (called by RoundManager)
