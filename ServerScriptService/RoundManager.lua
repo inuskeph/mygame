@@ -82,8 +82,8 @@ local function countdownTimer(duration, label)
         TimerSync:FireAllClients(i, label or RoundManager.CurrentState)
         task.wait(1)
 
-        -- Check early termination during seek phase
-        if RoundManager.CurrentState == RoundManager.States.SEEK then
+        -- Check early termination during seek phase (only if there are seekers)
+        if RoundManager.CurrentState == RoundManager.States.SEEK and #RoundManager.Seekers > 0 then
             if countAlivePlayers(RoundManager.Hiders) <= 0 then
                 return true -- All hiders found
             end
@@ -101,8 +101,18 @@ function RoundManager.AssignRoles(players)
     RoundManager.Hiders = {}
     RoundManager.Eliminated = {}
 
-    -- Determine number of seekers
+    -- Determine number of seekers (but always keep at least 1 hider)
     local numSeekers = math.max(1, math.ceil(#players * GameConfig.SeekerRatio))
+
+    -- IMPORTANT: Ensure at least 1 hider exists
+    if numSeekers >= #players then
+        numSeekers = #players - 1
+    end
+
+    -- Solo testing mode: if only 1 player, make them a Hider (they can test painting/freezing)
+    if #players == 1 then
+        numSeekers = 0
+    end
 
     -- Shuffle players for random assignment
     local shuffled = {}
@@ -253,6 +263,7 @@ function RoundManager.SeekPhase()
     end)
 
     -- Countdown - returns true if all hiders found early
+    -- Only check for early end if there are actually seekers hunting
     local allFound = countdownTimer(GameConfig.SeekPhaseTime, "Find the Chameleons!")
 
     -- Award survival bonus to remaining hiders
