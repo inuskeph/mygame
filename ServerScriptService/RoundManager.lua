@@ -377,7 +377,7 @@ end
 function RoundManager.TeleportPlayersToMap(players)
     -- Map spawn positions (add your custom map positions here)
     local mapPositions = {
-        MyMap = Vector3.new(4, 48.5, 473),
+        Construction = Vector3.new(4, 48.5, 473),
         -- Add more custom maps here:
         -- MapName = Vector3.new(x, y, z),
     }
