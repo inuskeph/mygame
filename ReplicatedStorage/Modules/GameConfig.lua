@@ -46,7 +46,14 @@ GameConfig.TauntDuration = 2             -- How long taunt animation/sound plays
 GameConfig.TauntDetectionBonus = 1.5     -- Multiplier to detection radius during taunt
 
 -- Map Configuration
-GameConfig.DefaultMap = "Playground"      -- Default map name
-GameConfig.MapRotation = true            -- Rotate maps between rounds
+GameConfig.DefaultMap = "School"          -- Default map if no vote happens
+GameConfig.MapRotation = true             -- Rotate maps between rounds
+
+-- Voting System
+GameConfig.VotingEnabled = true           -- Enable/disable map voting
+GameConfig.VoteTime = 15                  -- Seconds players have to vote
+GameConfig.VoteOptionsCount = 3           -- Number of map options shown
+GameConfig.VoteResultDisplayTime = 3      -- Seconds to show winner before loading map
+GameConfig.MinPlayersForVote = 1          -- Min players needed to trigger vote (set to 1 for solo testing)
 
 return GameConfig

@@ -8,9 +8,12 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local ServerStorage = game:GetService("ServerStorage")
+local Workspace = game:GetService("Workspace")
 
 -- Modules
 local GameConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GameConfig"))
+local VoteSystem = require(script.Parent:WaitForChild("VoteSystem"))
+local MapGenerator = require(script.Parent:WaitForChild("MapGenerator"))
 
 -- Wait for events to be initialized
 local Events = ReplicatedStorage:WaitForChild("Events")
@@ -46,6 +49,8 @@ RoundManager.Seekers = {}       -- {Player} list
 RoundManager.Hiders = {}        -- {Player} list
 RoundManager.Eliminated = {}    -- {Player} list (hiders that got tagged)
 RoundManager.PlayerScores = {}  -- {[Player] = {points, coins}}
+RoundManager.CurrentMapName = nil -- Currently loaded map name
+RoundManager.CurrentMapFolder = nil -- Currently loaded map folder
 
 ----------------------------------------------------------------------
 -- UTILITY FUNCTIONS
@@ -292,6 +297,94 @@ function RoundManager.ResultsPhase()
 end
 
 ----------------------------------------------------------------------
+-- MAP VOTING & LOADING
+----------------------------------------------------------------------
+
+function RoundManager.VotePhase()
+    if not GameConfig.VotingEnabled then
+        return GameConfig.DefaultMap
+    end
+
+    -- Start the vote
+    VoteSystem.StartVote()
+
+    -- Countdown during voting
+    for i = GameConfig.VoteTime, 0, -1 do
+        TimerSync:FireAllClients(i, "Vote for a map!")
+        task.wait(1)
+    end
+
+    -- End vote and get winner
+    local winningMap = VoteSystem.EndVote()
+
+    -- Show result for a moment
+    task.wait(GameConfig.VoteResultDisplayTime)
+
+    -- Reset vote system for next round
+    VoteSystem.Reset()
+
+    return winningMap
+end
+
+function RoundManager.LoadMap(mapName)
+    -- Clean up previous map if exists
+    RoundManager.UnloadMap()
+
+    local mapOrigin = Vector3.new(0, 0, 200)
+
+    -- Generate the map
+    local mapFolder = MapGenerator.GenerateMap(mapName, mapOrigin)
+    if mapFolder then
+        -- Put in Workspace/Maps
+        local mapsFolder = Workspace:FindFirstChild("Maps")
+        if not mapsFolder then
+            mapsFolder = Instance.new("Folder")
+            mapsFolder.Name = "Maps"
+            mapsFolder.Parent = Workspace
+        end
+        mapFolder.Parent = mapsFolder
+        RoundManager.CurrentMapFolder = mapFolder
+        RoundManager.CurrentMapName = mapName
+        print("[RoundManager] Map loaded:", mapName)
+    else
+        warn("[RoundManager] Failed to generate map:", mapName)
+        RoundManager.CurrentMapName = GameConfig.DefaultMap
+    end
+end
+
+function RoundManager.UnloadMap()
+    if RoundManager.CurrentMapFolder and RoundManager.CurrentMapFolder.Parent then
+        RoundManager.CurrentMapFolder:Destroy()
+        RoundManager.CurrentMapFolder = nil
+    end
+    RoundManager.CurrentMapName = nil
+end
+
+function RoundManager.TeleportPlayersToMap(players)
+    local mapOrigin = Vector3.new(0, 0, 200)
+    for i, p in ipairs(players) do
+        if p and p.Character then
+            local rootPart = p.Character:FindFirstChild("HumanoidRootPart")
+            if rootPart then
+                local offset = Vector3.new(math.random(-20, 20), 5, math.random(-20, 20))
+                rootPart.CFrame = CFrame.new(mapOrigin + offset)
+            end
+        end
+    end
+end
+
+function RoundManager.TeleportPlayersToLobby(players)
+    for _, p in ipairs(players) do
+        if p and p.Character then
+            local rootPart = p.Character:FindFirstChild("HumanoidRootPart")
+            if rootPart then
+                rootPart.CFrame = CFrame.new(Vector3.new(math.random(-10, 10), 5, math.random(-10, 10)))
+            end
+        end
+    end
+end
+
+----------------------------------------------------------------------
 -- MAIN GAME LOOP
 ----------------------------------------------------------------------
 
@@ -308,6 +401,18 @@ function RoundManager.StartGameLoop()
             RoundManager.CurrentRound += 1
             RoundManager.RoundActive = true
             RoundManager.InitScores(players)
+
+            -- VOTE PHASE - Players vote on map
+            local chosenMap = RoundManager.VotePhase()
+
+            -- LOAD MAP
+            RoundManager.LoadMap(chosenMap)
+
+            -- Teleport players to map
+            RoundManager.TeleportPlayersToMap(players)
+            task.wait(1) -- Brief pause after teleport
+
+            -- ASSIGN ROLES
             RoundManager.AssignRoles(players)
 
             -- PREP PHASE - Hiders paint themselves
@@ -321,6 +426,10 @@ function RoundManager.StartGameLoop()
 
             -- RESULTS PHASE - Show scores and winners
             RoundManager.ResultsPhase()
+
+            -- CLEANUP - Unload map and teleport back to lobby
+            RoundManager.UnloadMap()
+            RoundManager.TeleportPlayersToLobby(Players:GetPlayers())
 
             RoundManager.RoundActive = false
         else

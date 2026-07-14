@@ -41,6 +41,11 @@ local remoteEvents = {
     "PlayerEliminated",
     "GameOver",
     "TeleportPlayer",
+    -- Voting system events
+    "VoteStart",
+    "VoteUpdate",
+    "VoteEnd",
+    "CastVote",
 }
 
 -- List of RemoteFunctions
