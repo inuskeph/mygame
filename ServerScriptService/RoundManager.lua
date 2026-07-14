@@ -375,13 +375,24 @@ function RoundManager.UnloadMap()
 end
 
 function RoundManager.TeleportPlayersToMap(players)
-    -- Check if using custom map with known position, otherwise use default origin
+    -- Map spawn positions (add your custom map positions here)
+    local mapPositions = {
+        MyMap = Vector3.new(4, 48.5, 473),
+        -- Add more custom maps here:
+        -- MapName = Vector3.new(x, y, z),
+    }
+
+    -- Use custom position if available, otherwise use generated map origin
     local mapOrigin
-    if RoundManager.IsCustomMap then
-        mapOrigin = Vector3.new(4, 48.5, 473) -- Custom map position
+    if RoundManager.CurrentMapName and mapPositions[RoundManager.CurrentMapName] then
+        mapOrigin = mapPositions[RoundManager.CurrentMapName]
+    elseif RoundManager.IsCustomMap then
+        mapOrigin = Vector3.new(4, 48.5, 473)
     else
-        mapOrigin = Vector3.new(0, 0, 200) -- Generated maps position
+        mapOrigin = Vector3.new(0, 0, 200)
     end
+
+    print("[RoundManager] Teleporting players to:", mapOrigin)
 
     for i, p in ipairs(players) do
         if p and p.Character then
