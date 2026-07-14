@@ -357,10 +357,7 @@ end)
 -- START
 ----------------------------------------------------------------------
 
--- Initialize remote events first
-require(ReplicatedStorage:WaitForChild("Events"):WaitForChild("RemoteEvents"))
-
--- Start the game loop
+-- Start the game loop (Events are created by EventsInitializer script)
 task.spawn(RoundManager.StartGameLoop)
 
 return RoundManager
