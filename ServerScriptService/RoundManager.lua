@@ -15,6 +15,7 @@ local GameConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChil
 local VoteSystem = require(script.Parent:WaitForChild("VoteSystem"))
 local MapGenerator = require(script.Parent:WaitForChild("MapGenerator"))
 local DummyCharacter = require(script.Parent:WaitForChild("DummyCharacter"))
+local PaintServer = require(script.Parent:WaitForChild("PaintServer"))
 
 -- Wait for events to be initialized
 local Events = ReplicatedStorage:WaitForChild("Events")
@@ -226,29 +227,22 @@ function RoundManager.LobbyPhase()
 end
 
 function RoundManager.PrepPhase(players)
+    -- Enable painting for hiders
+    PaintServer.EnablePainting(RoundManager.CurrentMapName or GameConfig.DefaultMap)
+
     broadcastState(RoundManager.States.PREP, {
         seekers = RoundManager.Seekers,
         hiders = RoundManager.Hiders,
     })
 
-    -- During prep phase:
-    -- Hiders can paint themselves
-    -- Seekers are blinded / held in a separate area
-    for _, seeker in ipairs(RoundManager.Seekers) do
-        if seeker.Character then
-            -- Blind seekers (handled client-side via RoundStateChanged)
-            -- Optionally teleport to seeker waiting area
-        end
-    end
-
     countdownTimer(GameConfig.PrepPhaseTime, "Paint yourself!")
 end
 
 function RoundManager.HidePhase()
-    broadcastState(RoundManager.States.HIDE)
+    -- Disable painting during hide phase
+    PaintServer.DisablePainting()
 
-    -- Hiders have extra time to find their hiding spot
-    -- Paint is disabled, only movement and freezing allowed
+    broadcastState(RoundManager.States.HIDE)
     countdownTimer(GameConfig.HidePhaseTime, "Find your spot!")
 end
 

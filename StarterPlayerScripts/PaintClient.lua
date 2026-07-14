@@ -220,6 +220,7 @@ RoundStateChanged.OnClientEvent:Connect(function(state, data)
         -- Enable painting mode
         paintMode = true
         brushActive = true
+        remainingCharges = GameConfig.MaxPaintCharges -- Start with full charges
 
         -- Fetch color palette from server
         local success, palette = pcall(function()
@@ -233,7 +234,7 @@ RoundStateChanged.OnClientEvent:Connect(function(state, data)
             end
         end
 
-        print("[PaintClient] Painting enabled! Use B for brush, F for full body, 1-9 for colors, RMB to sample.")
+        print("[PaintClient] Painting enabled! Press F to paint full body, 1-9 for colors, RMB to sample.")
 
     elseif state == "HidePhase" then
         -- Disable painting in hide phase (only positioning)
