@@ -406,11 +406,12 @@ function RoundManager.TeleportPlayersToMap(players)
 end
 
 function RoundManager.TeleportPlayersToLobby(players)
+    local lobbyPosition = Vector3.new(-221, 12.375, 488.175) -- Custom lobby position
     for _, p in ipairs(players) do
         if p and p.Character then
             local rootPart = p.Character:FindFirstChild("HumanoidRootPart")
             if rootPart then
-                rootPart.CFrame = CFrame.new(Vector3.new(math.random(-10, 10), 5, math.random(-10, 10)))
+                rootPart.CFrame = CFrame.new(lobbyPosition + Vector3.new(math.random(-10, 10), 5, math.random(-10, 10)))
             end
         end
     end

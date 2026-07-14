@@ -140,7 +140,7 @@ MapManager.ActiveColorPools = {}     -- Spawned color pool parts
 MapManager.MapFolder = nil           -- Current map folder in Workspace
 
 -- Lobby spawn position
-MapManager.LobbySpawn = Vector3.new(0, 10, 0)
+MapManager.LobbySpawn = Vector3.new(-221, 12.375, 488.175)
 
 -- Map rotation order
 MapManager.RotationOrder = { "Playground", "Kitchen", "Forest" }
@@ -549,9 +549,8 @@ if not Workspace:FindFirstChild("Maps") then
     mapsFolder.Parent = Workspace
 end
 
--- Create lobby on startup
-MapManager.CreateLobby()
-
-print("[MapManager] Map system initialized with", #MapManager.RotationOrder, "maps in rotation")
+-- Create lobby on startup (DISABLED - using custom lobby)
+-- MapManager.CreateLobby()
+print("[MapManager] Map system initialized (custom lobby mode)")
 
 return MapManager
