@@ -14,6 +14,7 @@ local Workspace = game:GetService("Workspace")
 local GameConfig = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GameConfig"))
 local VoteSystem = require(script.Parent:WaitForChild("VoteSystem"))
 local MapGenerator = require(script.Parent:WaitForChild("MapGenerator"))
+local DummyCharacter = require(script.Parent:WaitForChild("DummyCharacter"))
 
 -- Wait for events to be initialized
 local Events = ReplicatedStorage:WaitForChild("Events")
@@ -448,6 +449,10 @@ function RoundManager.StartGameLoop()
             -- ASSIGN ROLES
             RoundManager.AssignRoles(players)
 
+            -- Transform hiders into white dummies
+            DummyCharacter.TransformHiders(RoundManager.Hiders)
+            task.wait(0.5) -- Brief pause for transformation
+
             -- PREP PHASE - Hiders paint themselves
             RoundManager.PrepPhase(players)
 
@@ -461,6 +466,7 @@ function RoundManager.StartGameLoop()
             RoundManager.ResultsPhase()
 
             -- CLEANUP - Unload map and teleport back to lobby
+            DummyCharacter.RestoreAll() -- Restore player appearances
             RoundManager.UnloadMap()
             RoundManager.TeleportPlayersToLobby(Players:GetPlayers())
 
