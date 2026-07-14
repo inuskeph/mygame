@@ -375,12 +375,19 @@ function RoundManager.UnloadMap()
 end
 
 function RoundManager.TeleportPlayersToMap(players)
-    local mapOrigin = Vector3.new(0, 0, 200)
+    -- Check if using custom map with known position, otherwise use default origin
+    local mapOrigin
+    if RoundManager.IsCustomMap then
+        mapOrigin = Vector3.new(4, 48.5, 473) -- Custom map position
+    else
+        mapOrigin = Vector3.new(0, 0, 200) -- Generated maps position
+    end
+
     for i, p in ipairs(players) do
         if p and p.Character then
             local rootPart = p.Character:FindFirstChild("HumanoidRootPart")
             if rootPart then
-                local offset = Vector3.new(math.random(-20, 20), 5, math.random(-20, 20))
+                local offset = Vector3.new(math.random(-15, 15), 5, math.random(-15, 15))
                 rootPart.CFrame = CFrame.new(mapOrigin + offset)
             end
         end
