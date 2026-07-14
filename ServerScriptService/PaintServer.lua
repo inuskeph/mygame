@@ -64,29 +64,16 @@ PaintCharacter.OnServerEvent:Connect(function(player, partName, color)
     end
     if not validPart then return end
 
-    -- Validate color is in the palette
-    if not PaintSystem.IsColorAllowed(color, currentMapName) then
-        warn("[PaintServer] Player", player.Name, "tried to use invalid color")
-        return
-    end
+    -- Validate color is a valid Color3 (any color allowed now - free painting!)
+    if typeof(color) ~= "Color3" then return end
 
-    -- Check and use paint charge
-    if not useCharge(player) then
-        -- Notify client: out of paint
-        PaintCharacter:FireClient(player, "NO_CHARGES", getCharges(player))
-        return
-    end
-
-    -- Apply the paint
+    -- Apply the paint (no charge limit for free painting)
     local success = PaintSystem.ApplyPaint(player.Character, partName, color)
 
     if success then
-        -- Confirm to client with remaining charges
-        PaintCharacter:FireClient(player, "SUCCESS", getCharges(player))
+        PaintCharacter:FireClient(player, "SUCCESS", 99)
     else
-        -- Refund the charge if paint failed
-        playerPaintCharges[player] += 1
-        PaintCharacter:FireClient(player, "FAILED", getCharges(player))
+        PaintCharacter:FireClient(player, "FAILED", 99)
     end
 end)
 
