@@ -75,40 +75,58 @@ screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
 ----------------------------------------------------------------------
--- TIMER DISPLAY (top center)
+-- TIMER DISPLAY (top center) - PROGRESS BAR STYLE
 ----------------------------------------------------------------------
 
-local timerFrame = Instance.new("Frame")
-timerFrame.Name = "TimerFrame"
-timerFrame.Size = UDim2.new(0, 280, 0, 60)
-timerFrame.Position = UDim2.new(0.5, -140, 0, 10)
-timerFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-timerFrame.BackgroundTransparency = 0.2
-timerFrame.Parent = screenGui
-createCorner(timerFrame, 12)
-createStroke(timerFrame, Color3.fromRGB(80, 150, 255), 2)
+local timerBarBg = Instance.new("Frame")
+timerBarBg.Name = "TimerBarBg"
+timerBarBg.Size = UDim2.new(0, 500, 0, 35)
+timerBarBg.Position = UDim2.new(0.5, -250, 0, 10)
+timerBarBg.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+timerBarBg.BackgroundTransparency = 0.2
+timerBarBg.Parent = screenGui
+createCorner(timerBarBg, 10)
+createStroke(timerBarBg, Color3.fromRGB(80, 150, 255), 2)
 
+-- Progress bar fill
+local timerBarFill = Instance.new("Frame")
+timerBarFill.Name = "TimerBarFill"
+timerBarFill.Size = UDim2.new(1, -6, 1, -6)
+timerBarFill.Position = UDim2.new(0, 3, 0, 3)
+timerBarFill.BackgroundColor3 = Color3.fromRGB(80, 180, 255)
+timerBarFill.Parent = timerBarBg
+createCorner(timerBarFill, 8)
+
+-- Phase label (on top of bar)
 local timerLabel = Instance.new("TextLabel")
 timerLabel.Name = "TimerLabel"
-timerLabel.Size = UDim2.new(1, 0, 0.4, 0)
-timerLabel.Position = UDim2.new(0, 0, 0, 4)
+timerLabel.Size = UDim2.new(0.7, 0, 1, 0)
+timerLabel.Position = UDim2.new(0, 10, 0, 0)
 timerLabel.BackgroundTransparency = 1
-timerLabel.TextColor3 = Color3.fromRGB(180, 200, 255)
+timerLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 timerLabel.Text = "LOBBY"
 timerLabel.TextSize = 14
 timerLabel.Font = Enum.Font.GothamBold
-timerLabel.Parent = timerFrame
+timerLabel.TextXAlignment = Enum.TextXAlignment.Left
+timerLabel.ZIndex = 2
+timerLabel.Parent = timerBarBg
 
+-- Time remaining number (right side)
 local timerValue = Instance.new("TextLabel")
 timerValue.Name = "TimerValue"
-timerValue.Size = UDim2.new(1, 0, 0.6, 0)
-timerValue.Position = UDim2.new(0, 0, 0.35, 0)
+timerValue.Size = UDim2.new(0.3, -10, 1, 0)
+timerValue.Position = UDim2.new(0.7, 0, 0, 0)
 timerValue.BackgroundTransparency = 1
 timerValue.TextColor3 = Color3.fromRGB(255, 255, 255)
-timerValue.Text = "--:--"
-timerValue.TextSize = 28
+timerValue.Text = "--"
+timerValue.TextSize = 16
 timerValue.Font = Enum.Font.GothamBlack
-timerValue.Parent = timerFrame
+timerValue.TextXAlignment = Enum.TextXAlignment.Right
+timerValue.ZIndex = 2
+timerValue.Parent = timerBarBg
+
+-- Track total time for progress bar
+local currentPhaseTotal = 30
 
 
 ----------------------------------------------------------------------
@@ -531,19 +549,26 @@ end
 -- Timer sync
 TimerSync.OnClientEvent:Connect(function(seconds, label)
     if seconds < 0 then
-        timerValue.Text = "--:--"
+        timerValue.Text = "--"
         timerLabel.Text = label or "WAITING"
+        timerBarFill.Size = UDim2.new(1, -6, 1, -6)
     else
-        local minutes = math.floor(seconds / 60)
-        local secs = seconds % 60
-        timerValue.Text = string.format("%d:%02d", minutes, secs)
+        timerValue.Text = tostring(seconds) .. "s"
         timerLabel.Text = string.upper(label or currentState)
 
-        -- Flash red when time is low
-        if seconds <= 10 and seconds > 0 then
-            timerValue.TextColor3 = Color3.fromRGB(255, 80, 80)
+        -- Update progress bar fill
+        local progress = math.clamp(seconds / currentPhaseTotal, 0, 1)
+        TweenService:Create(timerBarFill, TweenInfo.new(0.5, Enum.EasingStyle.Linear), {
+            Size = UDim2.new(progress, -6, 1, -6)
+        }):Play()
+
+        -- Color changes based on time remaining
+        if seconds <= 5 then
+            timerBarFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+        elseif seconds <= 15 then
+            timerBarFill.BackgroundColor3 = Color3.fromRGB(255, 180, 50)
         else
-            timerValue.TextColor3 = Color3.fromRGB(255, 255, 255)
+            timerBarFill.BackgroundColor3 = Color3.fromRGB(80, 180, 255)
         end
     end
 end)
@@ -584,13 +609,16 @@ RoundStateChanged.OnClientEvent:Connect(function(state, data)
         abilityFrame.Visible = false
         controlsFrame.Visible = false
         timerLabel.Text = "LOBBY"
+        timerBarFill.BackgroundColor3 = Color3.fromRGB(80, 180, 255)
+        currentPhaseTotal = GameConfig.LobbyWaitTime
         myRole = nil
 
     elseif state == "PrepPhase" then
+        currentPhaseTotal = GameConfig.PrepPhaseTime
+        timerBarFill.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
         if myRole == "Hider" then
             paintFrame.Visible = true
             paletteFrame.Visible = true
-            -- Build palette from available colors
             local palette = PaintSystem.GetPalette(GameConfig.DefaultMap)
             buildPalette(palette)
         end
@@ -598,11 +626,15 @@ RoundStateChanged.OnClientEvent:Connect(function(state, data)
         updateControls(state, myRole)
 
     elseif state == "HidePhase" then
+        currentPhaseTotal = GameConfig.HidePhaseTime
+        timerBarFill.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
         paintFrame.Visible = false
         paletteFrame.Visible = false
         updateControls(state, myRole)
 
     elseif state == "SeekPhase" then
+        currentPhaseTotal = GameConfig.SeekPhaseTime
+        timerBarFill.BackgroundColor3 = Color3.fromRGB(255, 80, 80)
         paintFrame.Visible = false
         paletteFrame.Visible = false
         if myRole == "Seeker" then
@@ -611,6 +643,8 @@ RoundStateChanged.OnClientEvent:Connect(function(state, data)
         updateControls(state, myRole)
 
     elseif state == "Results" then
+        currentPhaseTotal = GameConfig.ResultsTime
+        timerBarFill.BackgroundColor3 = Color3.fromRGB(255, 220, 50)
         abilityFrame.Visible = false
         controlsFrame.Visible = false
         if data then

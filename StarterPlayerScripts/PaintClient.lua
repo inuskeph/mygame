@@ -1,6 +1,10 @@
 --[[
     PaintClient.lua (LocalScript)
-    Color wheel paint system for hiders.
+    Meccha Chameleon style paint system:
+    - Walk into color pools on the ground to pick up color
+    - Body part selection buttons (Head, Torso, Arms, Legs)
+    - Paint All / Freeze / Pose buttons at bottom
+    - Current color indicator
     Place in StarterPlayerScripts.
 ]]
 
@@ -15,329 +19,291 @@ local Events = ReplicatedStorage:WaitForChild("Events")
 local PaintCharacter = Events:WaitForChild("PaintCharacter")
 local RoundStateChanged = Events:WaitForChild("RoundStateChanged")
 local RoleAssigned = Events:WaitForChild("RoleAssigned")
+local FreezeCharacter = Events:WaitForChild("FreezeCharacter")
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui")
 local mouse = player:GetMouse()
-local camera = Workspace.CurrentCamera
 
 -- State
 local myRole = nil
 local paintMode = false
 local selectedColor = Color3.fromRGB(255, 255, 255)
-local recentColors = {}
-local eyedropperMode = false
-local MAX_RECENT = 8
-local hue, sat, val = 0, 0, 1
-local draggingWheel = false
-local draggingBrightness = false
+local isFrozen = false
 
--- HSV to RGB
-local function hsvToRgb(h, s, v)
-    local r, g, b
-    local i = math.floor(h * 6)
-    local f = h * 6 - i
-    local p = v * (1 - s)
-    local q = v * (1 - f * s)
-    local t = v * (1 - (1 - f) * s)
-    i = i % 6
-    if i == 0 then r,g,b = v,t,p
-    elseif i == 1 then r,g,b = q,v,p
-    elseif i == 2 then r,g,b = p,v,t
-    elseif i == 3 then r,g,b = p,q,v
-    elseif i == 4 then r,g,b = t,p,v
-    elseif i == 5 then r,g,b = v,p,q end
-    return Color3.new(r, g, b)
-end
+----------------------------------------------------------------------
+-- UI CREATION
+----------------------------------------------------------------------
 
-
--- UI
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "PaintToolGui"
+screenGui.Name = "PaintUI"
 screenGui.ResetOnSpawn = false
 screenGui.Enabled = false
 screenGui.DisplayOrder = 70
 screenGui.Parent = playerGui
 
-local paintPanel = Instance.new("Frame")
-paintPanel.Size = UDim2.new(0, 260, 0, 380)
-paintPanel.Position = UDim2.new(0, 15, 0.5, -190)
-paintPanel.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-paintPanel.BackgroundTransparency = 0.05
-paintPanel.Parent = screenGui
-Instance.new("UICorner", paintPanel).CornerRadius = UDim.new(0, 14)
-local ps = Instance.new("UIStroke", paintPanel)
-ps.Color = Color3.fromRGB(80, 150, 255)
-ps.Thickness = 2
-
-local title = Instance.new("TextLabel")
-title.Size = UDim2.new(1, 0, 0, 28)
-title.BackgroundTransparency = 1
-title.Text = "PAINT TOOL"
-title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.TextSize = 14
-title.Font = Enum.Font.GothamBlack
-title.Parent = paintPanel
-
--- Color wheel
-local wheelFrame = Instance.new("Frame")
-wheelFrame.Size = UDim2.new(0, 170, 0, 170)
-wheelFrame.Position = UDim2.new(0.5, -85, 0, 32)
-wheelFrame.BackgroundTransparency = 1
-wheelFrame.Parent = paintPanel
-
-local wheelImage = Instance.new("ImageLabel")
-wheelImage.Size = UDim2.new(1, 0, 1, 0)
-wheelImage.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-wheelImage.Image = "rbxassetid://6020106367"
-wheelImage.Parent = wheelFrame
-Instance.new("UICorner", wheelImage).CornerRadius = UDim.new(0.5, 0)
-
-local wheelSelector = Instance.new("Frame")
-wheelSelector.Size = UDim2.new(0, 12, 0, 12)
-wheelSelector.Position = UDim2.new(0.5, -6, 0.5, -6)
-wheelSelector.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-wheelSelector.Parent = wheelFrame
-Instance.new("UICorner", wheelSelector).CornerRadius = UDim.new(0.5, 0)
-local ss = Instance.new("UIStroke", wheelSelector)
-ss.Color = Color3.fromRGB(0, 0, 0)
-ss.Thickness = 2
-
-
--- Brightness slider
-local brightFrame = Instance.new("Frame")
-brightFrame.Size = UDim2.new(0, 220, 0, 18)
-brightFrame.Position = UDim2.new(0.5, -110, 0, 210)
-brightFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-brightFrame.Parent = paintPanel
-Instance.new("UICorner", brightFrame).CornerRadius = UDim.new(0, 6)
-local brightGradient = Instance.new("UIGradient", brightFrame)
-brightGradient.Color = ColorSequence.new(Color3.new(0,0,0), Color3.new(1,1,1))
-
-local brightSlider = Instance.new("Frame")
-brightSlider.Size = UDim2.new(0, 6, 1, 4)
-brightSlider.Position = UDim2.new(1, -6, 0, -2)
-brightSlider.BackgroundColor3 = Color3.new(1, 1, 1)
-brightSlider.Parent = brightFrame
-Instance.new("UICorner", brightSlider).CornerRadius = UDim.new(0, 3)
-
--- Preview + Buttons
-local previewFrame = Instance.new("Frame")
-previewFrame.Size = UDim2.new(0, 40, 0, 40)
-previewFrame.Position = UDim2.new(0, 15, 0, 240)
-previewFrame.BackgroundColor3 = selectedColor
-previewFrame.Parent = paintPanel
-Instance.new("UICorner", previewFrame).CornerRadius = UDim.new(0, 8)
-local pvStroke = Instance.new("UIStroke", previewFrame)
-pvStroke.Color = Color3.new(1, 1, 1)
-pvStroke.Thickness = 2
-
-local paintAllBtn = Instance.new("TextButton")
-paintAllBtn.Size = UDim2.new(0, 75, 0, 30)
-paintAllBtn.Position = UDim2.new(0, 65, 0, 245)
-paintAllBtn.BackgroundColor3 = Color3.fromRGB(50, 130, 50)
-paintAllBtn.Text = "PAINT ALL"
-paintAllBtn.TextColor3 = Color3.new(1, 1, 1)
-paintAllBtn.TextSize = 11
-paintAllBtn.Font = Enum.Font.GothamBold
-paintAllBtn.Parent = paintPanel
-Instance.new("UICorner", paintAllBtn).CornerRadius = UDim.new(0, 6)
-
-local eyedropBtn = Instance.new("TextButton")
-eyedropBtn.Size = UDim2.new(0, 75, 0, 30)
-eyedropBtn.Position = UDim2.new(0, 150, 0, 245)
-eyedropBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 130)
-eyedropBtn.Text = "SAMPLE"
-eyedropBtn.TextColor3 = Color3.new(1, 1, 1)
-eyedropBtn.TextSize = 11
-eyedropBtn.Font = Enum.Font.GothamBold
-eyedropBtn.Parent = paintPanel
-Instance.new("UICorner", eyedropBtn).CornerRadius = UDim.new(0, 6)
-
--- Recent colors
-local recentFrame = Instance.new("Frame")
-recentFrame.Size = UDim2.new(0, 230, 0, 28)
-recentFrame.Position = UDim2.new(0, 15, 0, 290)
-recentFrame.BackgroundTransparency = 1
-recentFrame.Parent = paintPanel
-local rl = Instance.new("UIListLayout", recentFrame)
-rl.FillDirection = Enum.FillDirection.Horizontal
-rl.Padding = UDim.new(0, 4)
-
-local instrLabel = Instance.new("TextLabel")
-instrLabel.Size = UDim2.new(1, -10, 0, 25)
-instrLabel.Position = UDim2.new(0, 5, 1, -30)
-instrLabel.BackgroundTransparency = 1
-instrLabel.Text = "LMB=Paint part | RMB/E=Sample | F=All"
-instrLabel.TextColor3 = Color3.fromRGB(120, 120, 140)
-instrLabel.TextSize = 9
-instrLabel.Font = Enum.Font.Gotham
-instrLabel.Parent = paintPanel
-
-
 ----------------------------------------------------------------------
--- FUNCTIONS
+-- CURRENT COLOR INDICATOR (top-left during paint)
 ----------------------------------------------------------------------
 
-local function updateSelectedColor()
-    selectedColor = hsvToRgb(hue, sat, val)
-    previewFrame.BackgroundColor3 = selectedColor
-    brightGradient.Color = ColorSequence.new(Color3.new(0,0,0), hsvToRgb(hue, sat, 1))
+local colorIndicator = Instance.new("Frame")
+colorIndicator.Name = "ColorIndicator"
+colorIndicator.Size = UDim2.new(0, 70, 0, 70)
+colorIndicator.Position = UDim2.new(0, 20, 0, 80)
+colorIndicator.BackgroundColor3 = selectedColor
+colorIndicator.Parent = screenGui
+Instance.new("UICorner", colorIndicator).CornerRadius = UDim.new(0.5, 0)
+local ciStroke = Instance.new("UIStroke", colorIndicator)
+ciStroke.Color = Color3.fromRGB(255, 255, 255)
+ciStroke.Thickness = 3
+
+local colorLabel = Instance.new("TextLabel")
+colorLabel.Size = UDim2.new(0, 70, 0, 20)
+colorLabel.Position = UDim2.new(0, 20, 0, 155)
+colorLabel.BackgroundTransparency = 1
+colorLabel.Text = "MY COLOR"
+colorLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+colorLabel.TextSize = 10
+colorLabel.Font = Enum.Font.GothamBold
+colorLabel.Parent = screenGui
+
+----------------------------------------------------------------------
+-- BODY PART SELECTION (right side panel)
+----------------------------------------------------------------------
+
+local bodyPanel = Instance.new("Frame")
+bodyPanel.Name = "BodyPanel"
+bodyPanel.Size = UDim2.new(0, 160, 0, 320)
+bodyPanel.Position = UDim2.new(1, -175, 0.5, -160)
+bodyPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+bodyPanel.BackgroundTransparency = 0.1
+bodyPanel.Parent = screenGui
+Instance.new("UICorner", bodyPanel).CornerRadius = UDim.new(0, 12)
+local bpStroke = Instance.new("UIStroke", bodyPanel)
+bpStroke.Color = Color3.fromRGB(60, 120, 200)
+bpStroke.Thickness = 2
+
+local bodyTitle = Instance.new("TextLabel")
+bodyTitle.Size = UDim2.new(1, 0, 0, 25)
+bodyTitle.Position = UDim2.new(0, 0, 0, 5)
+bodyTitle.BackgroundTransparency = 1
+bodyTitle.Text = "PAINT BODY"
+bodyTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+bodyTitle.TextSize = 12
+bodyTitle.Font = Enum.Font.GothamBlack
+bodyTitle.Parent = bodyPanel
+
+-- Body part buttons
+local bodyParts = {
+    {name = "Head", parts = {"Head"}, y = 35},
+    {name = "Torso", parts = {"UpperTorso", "LowerTorso", "Torso"}, y = 75},
+    {name = "Left Arm", parts = {"LeftUpperArm", "LeftLowerArm", "LeftHand", "Left Arm"}, y = 115},
+    {name = "Right Arm", parts = {"RightUpperArm", "RightLowerArm", "RightHand", "Right Arm"}, y = 155},
+    {name = "Left Leg", parts = {"LeftUpperLeg", "LeftLowerLeg", "LeftFoot", "Left Leg"}, y = 195},
+    {name = "Right Leg", parts = {"RightUpperLeg", "RightLowerLeg", "RightFoot", "Right Leg"}, y = 235},
+    {name = "ALL", parts = {"Head","UpperTorso","LowerTorso","LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot","Torso","Left Arm","Right Arm","Left Leg","Right Leg"}, y = 278},
+}
+
+for _, bp in ipairs(bodyParts) do
+    local btn = Instance.new("TextButton")
+    btn.Name = "Btn_" .. bp.name
+    btn.Size = UDim2.new(0, 135, 0, 32)
+    btn.Position = UDim2.new(0.5, -67, 0, bp.y)
+    btn.BackgroundColor3 = bp.name == "ALL" and Color3.fromRGB(50, 130, 50) or Color3.fromRGB(40, 40, 60)
+    btn.Text = bp.name
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 12
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = bodyPanel
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+
+    btn.MouseButton1Click:Connect(function()
+        if not paintMode then return end
+        if not player.Character then return end
+        for _, partName in ipairs(bp.parts) do
+            if player.Character:FindFirstChild(partName) then
+                PaintCharacter:FireServer(partName, selectedColor)
+                task.wait(0.02)
+            end
+        end
+        -- Flash button green
+        btn.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        task.delay(0.2, function()
+            btn.BackgroundColor3 = bp.name == "ALL" and Color3.fromRGB(50, 130, 50) or Color3.fromRGB(40, 40, 60)
+        end)
+    end)
+
+    -- Hover
+    btn.MouseEnter:Connect(function()
+        if bp.name ~= "ALL" then
+            btn.BackgroundColor3 = Color3.fromRGB(60, 60, 90)
+        end
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = bp.name == "ALL" and Color3.fromRGB(50, 130, 50) or Color3.fromRGB(40, 40, 60)
+    end)
 end
 
-local function addRecentColor(color)
-    for _, c in ipairs(recentColors) do
-        if math.abs(c.R-color.R)<0.02 and math.abs(c.G-color.G)<0.02 and math.abs(c.B-color.B)<0.02 then return end
+
+----------------------------------------------------------------------
+-- BOTTOM ACTION BUTTONS (Freeze, Pose, Sample)
+----------------------------------------------------------------------
+
+local bottomBar = Instance.new("Frame")
+bottomBar.Name = "BottomBar"
+bottomBar.Size = UDim2.new(0, 400, 0, 55)
+bottomBar.Position = UDim2.new(0.5, -200, 1, -70)
+bottomBar.BackgroundColor3 = Color3.fromRGB(15, 15, 25)
+bottomBar.BackgroundTransparency = 0.15
+bottomBar.Parent = screenGui
+Instance.new("UICorner", bottomBar).CornerRadius = UDim.new(0, 12)
+
+local bottomLayout = Instance.new("UIListLayout", bottomBar)
+bottomLayout.FillDirection = Enum.FillDirection.Horizontal
+bottomLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+bottomLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+bottomLayout.Padding = UDim.new(0, 10)
+
+local function makeBottomBtn(text, color, callback)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 110, 0, 40)
+    btn.BackgroundColor3 = color
+    btn.Text = text
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.TextSize = 13
+    btn.Font = Enum.Font.GothamBold
+    btn.Parent = bottomBar
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+    btn.MouseButton1Click:Connect(callback)
+    return btn
+end
+
+-- Freeze button
+local freezeBtn = makeBottomBtn("FREEZE [Q]", Color3.fromRGB(50, 100, 180), function()
+    if isFrozen then
+        FreezeCharacter:FireServer("UNFREEZE")
+        isFrozen = false
+        freezeBtn.Text = "FREEZE [Q]"
+        freezeBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 180)
+    else
+        FreezeCharacter:FireServer("FREEZE", "Standing")
+        isFrozen = true
+        freezeBtn.Text = "UNFREEZE [Q]"
+        freezeBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 50)
     end
-    table.insert(recentColors, 1, color)
-    if #recentColors > MAX_RECENT then table.remove(recentColors) end
-    for _, ch in ipairs(recentFrame:GetChildren()) do if ch:IsA("TextButton") then ch:Destroy() end end
-    for _, c in ipairs(recentColors) do
-        local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 24, 0, 24); btn.BackgroundColor3 = c; btn.Text = ""
-        btn.Parent = recentFrame
-        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 5)
-        btn.MouseButton1Click:Connect(function()
-            selectedColor = c; previewFrame.BackgroundColor3 = c
+end)
+
+-- Sample color button
+local sampleBtn = makeBottomBtn("SAMPLE [E]", Color3.fromRGB(80, 80, 130), function()
+    -- Next click will sample
+    eyedropActive = true
+    sampleBtn.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+    sampleBtn.Text = "CLICK MAP..."
+end)
+
+-- Pose button
+local poseBtn = makeBottomBtn("POSE [R]", Color3.fromRGB(100, 60, 130), function()
+    FreezeCharacter:FireServer("POSE", "TShaped")
+end)
+
+local eyedropActive = false
+
+----------------------------------------------------------------------
+-- COLOR POOL DETECTION (walk into pools on ground)
+----------------------------------------------------------------------
+
+local function onColorPoolTouched(part)
+    if not paintMode then return end
+    local poolColor = part:GetAttribute("PaintColor")
+    if poolColor then
+        selectedColor = poolColor
+        colorIndicator.BackgroundColor3 = selectedColor
+        -- Visual feedback
+        ciStroke.Color = Color3.fromRGB(0, 255, 0)
+        task.delay(0.3, function()
+            ciStroke.Color = Color3.fromRGB(255, 255, 255)
         end)
     end
 end
 
-local function paintBodyPart(partName)
-    PaintCharacter:FireServer(partName, selectedColor)
-    addRecentColor(selectedColor)
-end
-
-local function paintFullBody()
-    if not player.Character then return end
-    local parts = {"Head","UpperTorso","LowerTorso","LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot","Torso","Left Arm","Right Arm","Left Leg","Right Leg"}
-    for _, p in ipairs(parts) do
-        if player.Character:FindFirstChild(p) then
-            PaintCharacter:FireServer(p, selectedColor)
-            task.wait(0.02)
+local function setupTouchDetection()
+    local character = player.Character or player.CharacterAdded:Wait()
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+    rootPart.Touched:Connect(function(otherPart)
+        if otherPart:GetAttribute("IsColorPool") then
+            onColorPoolTouched(otherPart)
         end
-    end
-    addRecentColor(selectedColor)
+    end)
 end
 
-local function sampleColorFromWorld()
+player.CharacterAdded:Connect(setupTouchDetection)
+if player.Character then setupTouchDetection() end
+
+----------------------------------------------------------------------
+-- SAMPLE FROM WORLD (eyedropper)
+----------------------------------------------------------------------
+
+local function sampleColor()
     local pos = UserInputService:GetMouseLocation()
-    local ray = camera:ViewportPointToRay(pos.X, pos.Y)
+    local ray = Workspace.CurrentCamera:ViewportPointToRay(pos.X, pos.Y)
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Exclude
     params.FilterDescendantsInstances = {player.Character}
     local result = Workspace:Raycast(ray.Origin, ray.Direction * 500, params)
     if result and result.Instance and result.Instance:IsA("BasePart") then
         selectedColor = result.Instance.Color
-        previewFrame.BackgroundColor3 = selectedColor
-        addRecentColor(selectedColor)
-        eyedropperMode = false
-        eyedropBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 130)
-        eyedropBtn.Text = "SAMPLE"
+        colorIndicator.BackgroundColor3 = selectedColor
+        eyedropActive = false
+        sampleBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 130)
+        sampleBtn.Text = "SAMPLE [E]"
     end
 end
 
 
 ----------------------------------------------------------------------
--- WHEEL + SLIDER INTERACTION
-----------------------------------------------------------------------
-
-wheelImage.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingWheel = true end
-end)
-wheelImage.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingWheel = false end
-end)
-brightFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingBrightness = true end
-end)
-brightFrame.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingBrightness = false end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if input.UserInputType ~= Enum.UserInputType.MouseMovement then return end
-    if draggingWheel then
-        local center = wheelImage.AbsolutePosition + wheelImage.AbsoluteSize / 2
-        local radius = wheelImage.AbsoluteSize.X / 2
-        local dx = input.Position.X - center.X
-        local dy = input.Position.Y - center.Y
-        local dist = math.sqrt(dx*dx + dy*dy)
-        if dist <= radius then
-            hue = (math.atan2(dy, dx) / (2 * math.pi) + 0.5) % 1
-            sat = math.clamp(dist / radius, 0, 1)
-            wheelSelector.Position = UDim2.new(0.5 + dx/(radius*2), -6, 0.5 + dy/(radius*2), -6)
-            updateSelectedColor()
-        end
-    end
-    if draggingBrightness then
-        local relX = math.clamp((input.Position.X - brightFrame.AbsolutePosition.X) / brightFrame.AbsoluteSize.X, 0, 1)
-        val = relX
-        brightSlider.Position = UDim2.new(relX, -3, 0, -2)
-        updateSelectedColor()
-    end
-end)
-
--- Also handle single click on wheel
-wheelImage.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local center = wheelImage.AbsolutePosition + wheelImage.AbsoluteSize / 2
-        local radius = wheelImage.AbsoluteSize.X / 2
-        local dx = input.Position.X - center.X
-        local dy = input.Position.Y - center.Y
-        local dist = math.sqrt(dx*dx + dy*dy)
-        if dist <= radius then
-            hue = (math.atan2(dy, dx) / (2 * math.pi) + 0.5) % 1
-            sat = math.clamp(dist / radius, 0, 1)
-            wheelSelector.Position = UDim2.new(0.5 + dx/(radius*2), -6, 0.5 + dy/(radius*2), -6)
-            updateSelectedColor()
-        end
-    end
-end)
-brightFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        local relX = math.clamp((input.Position.X - brightFrame.AbsolutePosition.X) / brightFrame.AbsoluteSize.X, 0, 1)
-        val = relX
-        brightSlider.Position = UDim2.new(relX, -3, 0, -2)
-        updateSelectedColor()
-    end
-end)
-
-----------------------------------------------------------------------
--- BUTTON CLICKS
-----------------------------------------------------------------------
-
-paintAllBtn.MouseButton1Click:Connect(paintFullBody)
-eyedropBtn.MouseButton1Click:Connect(function()
-    eyedropperMode = not eyedropperMode
-    eyedropBtn.BackgroundColor3 = eyedropperMode and Color3.fromRGB(100,255,100) or Color3.fromRGB(80,80,130)
-    eyedropBtn.Text = eyedropperMode and "PICKING..." or "SAMPLE"
-end)
-
-
-----------------------------------------------------------------------
--- MAIN INPUT
+-- INPUT
 ----------------------------------------------------------------------
 
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     if not paintMode then return end
+
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        if eyedropperMode then sampleColorFromWorld()
+        if eyedropActive then
+            sampleColor()
         else
+            -- Click on own body part to paint it
             local target = mouse.Target
             if target and player.Character and target:IsDescendantOf(player.Character) then
-                paintBodyPart(target.Name)
+                PaintCharacter:FireServer(target.Name, selectedColor)
             end
         end
-    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
-        sampleColorFromWorld()
-    elseif input.UserInputType == Enum.UserInputType.Keyboard then
-        if input.KeyCode == Enum.KeyCode.F then paintFullBody() end
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        sampleColor()
+    end
+
+    if input.UserInputType == Enum.UserInputType.Keyboard then
+        if input.KeyCode == Enum.KeyCode.F then
+            -- Paint all
+            if player.Character then
+                local allParts = {"Head","UpperTorso","LowerTorso","LeftUpperArm","LeftLowerArm","LeftHand","RightUpperArm","RightLowerArm","RightHand","LeftUpperLeg","LeftLowerLeg","LeftFoot","RightUpperLeg","RightLowerLeg","RightFoot","Torso","Left Arm","Right Arm","Left Leg","Right Leg"}
+                for _, p in ipairs(allParts) do
+                    if player.Character:FindFirstChild(p) then
+                        PaintCharacter:FireServer(p, selectedColor)
+                        task.wait(0.02)
+                    end
+                end
+            end
+        end
         if input.KeyCode == Enum.KeyCode.E then
-            eyedropperMode = not eyedropperMode
-            eyedropBtn.BackgroundColor3 = eyedropperMode and Color3.fromRGB(100,255,100) or Color3.fromRGB(80,80,130)
-            eyedropBtn.Text = eyedropperMode and "PICKING..." or "SAMPLE"
+            eyedropActive = true
+            sampleBtn.BackgroundColor3 = Color3.fromRGB(100, 255, 100)
+            sampleBtn.Text = "CLICK MAP..."
+        end
+        if input.KeyCode == Enum.KeyCode.Q then
+            freezeBtn.MouseButton1Click:Fire()
         end
     end
 end)
@@ -351,29 +317,54 @@ RoleAssigned.OnClientEvent:Connect(function(role) myRole = role end)
 RoundStateChanged.OnClientEvent:Connect(function(state)
     if state == "PrepPhase" and myRole == "Hider" then
         paintMode = true
+        isFrozen = false
         screenGui.Enabled = true
-        paintPanel.Position = UDim2.new(-1, 0, 0.5, -190)
-        TweenService:Create(paintPanel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-            Position = UDim2.new(0, 15, 0.5, -190)
+        -- Slide in body panel
+        bodyPanel.Position = UDim2.new(1, 50, 0.5, -160)
+        TweenService:Create(bodyPanel, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Position = UDim2.new(1, -175, 0.5, -160)
         }):Play()
-    else
+        bottomBar.Position = UDim2.new(0.5, -200, 1, 60)
+        TweenService:Create(bottomBar, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+            Position = UDim2.new(0.5, -200, 1, -70)
+        }):Play()
+
+    elseif state == "HidePhase" and myRole == "Hider" then
+        -- Keep freeze/pose buttons but hide paint stuff
         paintMode = false
-        eyedropperMode = false
+        bodyPanel.Visible = false
+
+    elseif state == "SeekPhase" or state == "Lobby" or state == "Results" then
+        paintMode = false
+        eyedropActive = false
+        isFrozen = false
         if screenGui.Enabled then
-            TweenService:Create(paintPanel, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.In), {
-                Position = UDim2.new(-1, 0, 0.5, -190)
-            }):Play()
-            task.delay(0.4, function() screenGui.Enabled = false end)
+            screenGui.Enabled = false
         end
+        bodyPanel.Visible = true
         if state == "Lobby" or state == "Results" then myRole = nil end
     end
 end)
 
+-- Server paint response
 PaintCharacter.OnClientEvent:Connect(function(status)
     if status == "SUCCESS" then
-        pvStroke.Color = Color3.fromRGB(0, 255, 0)
-        task.delay(0.2, function() pvStroke.Color = Color3.new(1,1,1) end)
+        ciStroke.Color = Color3.fromRGB(0, 255, 0)
+        task.delay(0.15, function() ciStroke.Color = Color3.fromRGB(255, 255, 255) end)
     end
 end)
 
-print("[PaintClient] Color wheel paint system loaded!")
+-- Freeze response
+FreezeCharacter.OnClientEvent:Connect(function(status)
+    if status == "FROZEN" then
+        isFrozen = true
+        freezeBtn.Text = "UNFREEZE [Q]"
+        freezeBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 50)
+    elseif status == "UNFROZEN" then
+        isFrozen = false
+        freezeBtn.Text = "FREEZE [Q]"
+        freezeBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 180)
+    end
+end)
+
+print("[PaintClient] Meccha Chameleon style paint UI loaded!")

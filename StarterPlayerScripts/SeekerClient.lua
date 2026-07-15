@@ -98,61 +98,114 @@ hitMarker.Parent = crosshairGui
 ----------------------------------------------------------------------
 
 local function createBulletTrail(startPos, endPos, hit)
-    -- Create a thin beam from gun to target
+    -- Create a PAINT BALL projectile that flies to target
     local distance = (endPos - startPos).Magnitude
-    local midPoint = startPos + (endPos - startPos) / 2
+    local direction = (endPos - startPos).Unit
 
-    local trail = Instance.new("Part")
-    trail.Name = "BulletTrail"
-    trail.Size = Vector3.new(0.15, 0.15, distance)
-    trail.CFrame = CFrame.lookAt(midPoint, endPos)
-    trail.Anchored = true
-    trail.CanCollide = false
-    trail.Material = Enum.Material.Neon
-    trail.Color = hit and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 200, 50)
-    trail.Transparency = 0.3
-    trail.Parent = Workspace
+    -- Paint ball (visible sphere that travels)
+    local paintBall = Instance.new("Part")
+    paintBall.Name = "PaintBall"
+    paintBall.Shape = Enum.PartType.Ball
+    paintBall.Size = Vector3.new(1.5, 1.5, 1.5)
+    paintBall.Position = startPos
+    paintBall.Anchored = true
+    paintBall.CanCollide = false
+    paintBall.Material = Enum.Material.Neon
+    paintBall.Color = hit and Color3.fromRGB(255, 0, 50) or Color3.fromRGB(255, 150, 0)
+    paintBall.Transparency = 0
+    paintBall.Parent = Workspace
 
-    -- Fade out quickly
-    TweenService:Create(trail, TweenInfo.new(0.3), {
-        Transparency = 1,
-        Size = Vector3.new(0, 0, distance),
+    -- Trail behind the ball
+    local attachment0 = Instance.new("Attachment", paintBall)
+    local attachment1 = Instance.new("Attachment", paintBall)
+    attachment1.Position = Vector3.new(0, 0, 0.5)
+
+    local trail = Instance.new("Trail")
+    trail.Attachment0 = attachment0
+    trail.Attachment1 = attachment1
+    trail.Color = ColorSequence.new(hit and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 200, 0))
+    trail.Transparency = NumberSequence.new(0, 1)
+    trail.Lifetime = 0.3
+    trail.WidthScale = NumberSequence.new(1, 0)
+    trail.Parent = paintBall
+
+    -- Animate the ball flying to target
+    local flyTime = math.clamp(distance / 300, 0.05, 0.4) -- Faster for closer targets
+    TweenService:Create(paintBall, TweenInfo.new(flyTime, Enum.EasingStyle.Linear), {
+        Position = endPos
     }):Play()
 
-    task.delay(0.4, function()
-        trail:Destroy()
+    -- On arrival: SPLASH!
+    task.delay(flyTime, function()
+        paintBall.Transparency = 1
+        trail.Enabled = false
+
+        -- Create splash effect at impact point
+        local splash = Instance.new("Part")
+        splash.Name = "PaintSplash"
+        splash.Shape = Enum.PartType.Ball
+        splash.Size = Vector3.new(0.5, 0.5, 0.5)
+        splash.Position = endPos
+        splash.Anchored = true
+        splash.CanCollide = false
+        splash.Material = Enum.Material.Neon
+        splash.Color = hit and Color3.fromRGB(255, 0, 50) or Color3.fromRGB(255, 150, 0)
+        splash.Transparency = 0.3
+        splash.Parent = Workspace
+
+        -- Expand splash
+        TweenService:Create(splash, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Size = Vector3.new(hit and 5 or 3, hit and 5 or 3, hit and 5 or 3),
+            Transparency = 1,
+        }):Play()
+
+        -- Splat particles
+        local splatAttach = Instance.new("Attachment", splash)
+        local particles = Instance.new("ParticleEmitter")
+        particles.Color = ColorSequence.new(hit and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 180, 0))
+        particles.Size = NumberSequence.new(0.4, 0)
+        particles.Transparency = NumberSequence.new(0, 1)
+        particles.Lifetime = NumberRange.new(0.3, 0.6)
+        particles.Speed = NumberRange.new(8, 15)
+        particles.SpreadAngle = Vector2.new(360, 360)
+        particles.Rate = 0
+        particles.Parent = splatAttach
+        particles:Emit(20)
+
+        -- Paint decal on surface (flat circle)
+        local decalPart = Instance.new("Part")
+        decalPart.Name = "PaintDecal"
+        decalPart.Size = Vector3.new(3, 0.1, 3)
+        decalPart.Position = endPos
+        decalPart.Anchored = true
+        decalPart.CanCollide = false
+        decalPart.Material = Enum.Material.SmoothPlastic
+        decalPart.Color = hit and Color3.fromRGB(255, 0, 50) or Color3.fromRGB(255, 180, 0)
+        decalPart.Transparency = 0.3
+        decalPart.Parent = Workspace
+        Instance.new("UICorner") -- won't work on Part but that's fine
+
+        -- Fade out decal after a few seconds
+        task.delay(3, function()
+            TweenService:Create(decalPart, TweenInfo.new(1), {
+                Transparency = 1
+            }):Play()
+            task.delay(1.2, function()
+                decalPart:Destroy()
+            end)
+        end)
+
+        -- Cleanup
+        task.delay(1, function()
+            paintBall:Destroy()
+            splash:Destroy()
+        end)
     end)
 end
 
 local function createSplashEffect(position, color)
-    -- Paint splash particle at hit location
-    local part = Instance.new("Part")
-    part.Size = Vector3.new(1, 1, 1)
-    part.Position = position
-    part.Anchored = true
-    part.CanCollide = false
-    part.Transparency = 1
-    part.Parent = Workspace
-
-    local attachment = Instance.new("Attachment")
-    attachment.Parent = part
-
-    local particles = Instance.new("ParticleEmitter")
-    particles.Color = ColorSequence.new(color)
-    particles.Size = NumberSequence.new(0.5, 0)
-    particles.Transparency = NumberSequence.new(0, 1)
-    particles.Lifetime = NumberRange.new(0.3, 0.6)
-    particles.Rate = 0
-    particles.Speed = NumberRange.new(5, 10)
-    particles.SpreadAngle = Vector2.new(360, 360)
-    particles.Parent = attachment
-
-    -- Burst
-    particles:Emit(15)
-
-    task.delay(1, function()
-        part:Destroy()
-    end)
+    -- This is now handled inside createBulletTrail on impact
+    -- Keeping for compatibility but it's a no-op
 end
 
 local function shootPaintGun()
