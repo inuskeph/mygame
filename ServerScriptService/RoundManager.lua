@@ -475,20 +475,15 @@ end
 -- EVENT CONNECTIONS
 ----------------------------------------------------------------------
 
--- Seeker tagging a hider
+-- Seeker tagging a hider (via paint gun - no distance limit)
 SeekerTag.OnServerEvent:Connect(function(seeker, targetPlayer)
     if RoundManager.CurrentState ~= RoundManager.States.SEEK then return end
     if not table.find(RoundManager.Seekers, seeker) then return end
 
-    -- Validate distance
-    if seeker.Character and targetPlayer and targetPlayer.Character then
-        local seekerPos = seeker.Character:FindFirstChild("HumanoidRootPart")
-        local targetPos = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if seekerPos and targetPos then
-            local distance = (seekerPos.Position - targetPos.Position).Magnitude
-            if distance <= GameConfig.TagDistance then
-                RoundManager.EliminateHider(seeker, targetPlayer)
-            end
+    -- Validate target is a hider
+    if targetPlayer and targetPlayer.Character then
+        if table.find(RoundManager.Hiders, targetPlayer) then
+            RoundManager.EliminateHider(seeker, targetPlayer)
         end
     end
 end)

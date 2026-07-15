@@ -1,7 +1,7 @@
 --[[
     SeekerClient.lua (LocalScript)
-    Client-side seeker controls and abilities.
-    Handles detection pulse, tagging, and highlight visuals.
+    Seeker controls: Paint gun to shoot hiders from distance.
+    Handles blind screen, detection pulse, and paint gun visuals.
     Place in StarterPlayerScripts.
 ]]
 
@@ -21,32 +21,220 @@ local HighlightHider = Events:WaitForChild("HighlightHider")
 local RoundStateChanged = Events:WaitForChild("RoundStateChanged")
 local RoleAssigned = Events:WaitForChild("RoleAssigned")
 
-----------------------------------------------------------------------
--- STATE
-----------------------------------------------------------------------
-
 local player = Players.LocalPlayer
 local camera = Workspace.CurrentCamera
 local mouse = player:GetMouse()
 
+----------------------------------------------------------------------
+-- STATE
+----------------------------------------------------------------------
+
 local myRole = nil
-local seekMode = false        -- Are we in seek phase as seeker?
-local pulseCooldown = 0       -- Remaining cooldown for pulse
-local activeHighlights = {}   -- Currently active highlight effects
-local canTag = true           -- Debounce for tagging
+local seekMode = false
+local pulseCooldown = 0
+local activeHighlights = {}
+local canShoot = true
+local GUN_RANGE = 200 -- Paint gun range in studs
+local SHOOT_COOLDOWN = 0.8 -- Seconds between shots
+
+----------------------------------------------------------------------
+-- CROSSHAIR UI
+----------------------------------------------------------------------
+
+local crosshairGui = Instance.new("ScreenGui")
+crosshairGui.Name = "CrosshairGui"
+crosshairGui.ResetOnSpawn = false
+crosshairGui.IgnoreGuiInset = true
+crosshairGui.Enabled = false
+crosshairGui.Parent = player:WaitForChild("PlayerGui")
+
+local crosshair = Instance.new("Frame")
+crosshair.Size = UDim2.new(0, 30, 0, 30)
+crosshair.Position = UDim2.new(0.5, -15, 0.5, -15)
+crosshair.BackgroundTransparency = 1
+crosshair.Parent = crosshairGui
+
+-- Crosshair lines
+local function makeLine(size, pos)
+    local line = Instance.new("Frame")
+    line.Size = size
+    line.Position = pos
+    line.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+    line.BorderSizePixel = 0
+    line.Parent = crosshair
+    return line
+end
+
+makeLine(UDim2.new(0, 2, 0, 12), UDim2.new(0.5, -1, 0, 0))   -- Top
+makeLine(UDim2.new(0, 2, 0, 12), UDim2.new(0.5, -1, 1, -12))  -- Bottom
+makeLine(UDim2.new(0, 12, 0, 2), UDim2.new(0, 0, 0.5, -1))    -- Left
+makeLine(UDim2.new(0, 12, 0, 2), UDim2.new(1, -12, 0.5, -1))  -- Right
+
+-- Center dot
+local centerDot = Instance.new("Frame")
+centerDot.Size = UDim2.new(0, 4, 0, 4)
+centerDot.Position = UDim2.new(0.5, -2, 0.5, -2)
+centerDot.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+centerDot.Parent = crosshair
+local dotCorner = Instance.new("UICorner")
+dotCorner.CornerRadius = UDim.new(0.5, 0)
+dotCorner.Parent = centerDot
+
+-- Hit marker (shows briefly on hit)
+local hitMarker = Instance.new("TextLabel")
+hitMarker.Size = UDim2.new(0, 40, 0, 40)
+hitMarker.Position = UDim2.new(0.5, -20, 0.5, -20)
+hitMarker.BackgroundTransparency = 1
+hitMarker.Text = "X"
+hitMarker.TextColor3 = Color3.fromRGB(255, 50, 50)
+hitMarker.TextSize = 30
+hitMarker.Font = Enum.Font.GothamBlack
+hitMarker.TextTransparency = 1
+hitMarker.Parent = crosshairGui
+
+
+----------------------------------------------------------------------
+-- PAINT GUN - SHOOT TO TAG
+----------------------------------------------------------------------
+
+local function createBulletTrail(startPos, endPos, hit)
+    -- Create a thin beam from gun to target
+    local distance = (endPos - startPos).Magnitude
+    local midPoint = startPos + (endPos - startPos) / 2
+
+    local trail = Instance.new("Part")
+    trail.Name = "BulletTrail"
+    trail.Size = Vector3.new(0.15, 0.15, distance)
+    trail.CFrame = CFrame.lookAt(midPoint, endPos)
+    trail.Anchored = true
+    trail.CanCollide = false
+    trail.Material = Enum.Material.Neon
+    trail.Color = hit and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 200, 50)
+    trail.Transparency = 0.3
+    trail.Parent = Workspace
+
+    -- Fade out quickly
+    TweenService:Create(trail, TweenInfo.new(0.3), {
+        Transparency = 1,
+        Size = Vector3.new(0, 0, distance),
+    }):Play()
+
+    task.delay(0.4, function()
+        trail:Destroy()
+    end)
+end
+
+local function createSplashEffect(position, color)
+    -- Paint splash particle at hit location
+    local part = Instance.new("Part")
+    part.Size = Vector3.new(1, 1, 1)
+    part.Position = position
+    part.Anchored = true
+    part.CanCollide = false
+    part.Transparency = 1
+    part.Parent = Workspace
+
+    local attachment = Instance.new("Attachment")
+    attachment.Parent = part
+
+    local particles = Instance.new("ParticleEmitter")
+    particles.Color = ColorSequence.new(color)
+    particles.Size = NumberSequence.new(0.5, 0)
+    particles.Transparency = NumberSequence.new(0, 1)
+    particles.Lifetime = NumberRange.new(0.3, 0.6)
+    particles.Rate = 0
+    particles.Speed = NumberRange.new(5, 10)
+    particles.SpreadAngle = Vector2.new(360, 360)
+    particles.Parent = attachment
+
+    -- Burst
+    particles:Emit(15)
+
+    task.delay(1, function()
+        part:Destroy()
+    end)
+end
+
+local function shootPaintGun()
+    if not seekMode then return end
+    if not canShoot then return end
+    if not player.Character then return end
+
+    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    canShoot = false
+
+    -- Raycast from camera center (where crosshair is)
+    local mousePos = UserInputService:GetMouseLocation()
+    local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    raycastParams.FilterDescendantsInstances = { player.Character }
+
+    local result = Workspace:Raycast(ray.Origin, ray.Direction * GUN_RANGE, raycastParams)
+
+    local startPos = rootPart.Position + Vector3.new(0, 1, 0)
+    local endPos = result and result.Position or (ray.Origin + ray.Direction * GUN_RANGE)
+    local hitPlayer = false
+
+    if result and result.Instance then
+        -- Check if we hit a player
+        local hitCharacter = result.Instance:FindFirstAncestorOfClass("Model")
+        if hitCharacter then
+            local targetPlayer = Players:GetPlayerFromCharacter(hitCharacter)
+            if targetPlayer and targetPlayer ~= player then
+                -- HIT! Send tag to server
+                SeekerTag:FireServer(targetPlayer)
+                hitPlayer = true
+
+                -- Show hit marker
+                hitMarker.TextTransparency = 0
+                TweenService:Create(hitMarker, TweenInfo.new(0.4), {
+                    TextTransparency = 1,
+                }):Play()
+
+                -- Splash on target
+                createSplashEffect(result.Position, Color3.fromRGB(255, 50, 50))
+            end
+        end
+
+        -- Splash on wall/floor if missed
+        if not hitPlayer then
+            createSplashEffect(result.Position, Color3.fromRGB(255, 150, 0))
+        end
+    end
+
+    -- Bullet trail visual
+    createBulletTrail(startPos, endPos, hitPlayer)
+
+    -- Crosshair kick animation
+    TweenService:Create(crosshair, TweenInfo.new(0.05), {
+        Position = UDim2.new(0.5, -15, 0.5, -20)
+    }):Play()
+    task.delay(0.05, function()
+        TweenService:Create(crosshair, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
+            Position = UDim2.new(0.5, -15, 0.5, -15)
+        }):Play()
+    end)
+
+    -- Cooldown
+    task.delay(SHOOT_COOLDOWN, function()
+        canShoot = true
+    end)
+end
+
 
 ----------------------------------------------------------------------
 -- DETECTION PULSE VISUAL
 ----------------------------------------------------------------------
 
--- Creates an expanding sphere visual for the detection pulse
 local function createPulseVisual()
     local character = player.Character
     if not character then return end
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
 
-    -- Create expanding sphere
     local sphere = Instance.new("Part")
     sphere.Name = "DetectionPulse"
     sphere.Shape = Enum.PartType.Ball
@@ -59,16 +247,12 @@ local function createPulseVisual()
     sphere.Transparency = 0.7
     sphere.Parent = Workspace
 
-    -- Expand animation
     local targetSize = GameConfig.DetectionPulseRadius * 2
-    local tweenInfo = TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-    local tween = TweenService:Create(sphere, tweenInfo, {
+    local tween = TweenService:Create(sphere, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
         Size = Vector3.new(targetSize, targetSize, targetSize),
         Transparency = 1,
     })
     tween:Play()
-
-    -- Cleanup after animation
     tween.Completed:Connect(function()
         sphere:Destroy()
     end)
@@ -78,18 +262,15 @@ end
 -- HIGHLIGHT SYSTEM
 ----------------------------------------------------------------------
 
--- Highlight a detected hider temporarily
 local function highlightPlayer(data)
     local targetName = data.playerName
     local duration = data.duration or GameConfig.HighlightDuration
 
-    -- Find the target player's character
     local targetPlayer = Players:FindFirstChild(targetName)
     if not targetPlayer or not targetPlayer.Character then return end
 
     local character = targetPlayer.Character
 
-    -- Create highlight effect
     local highlight = Instance.new("Highlight")
     highlight.Name = "SeekerDetection"
     highlight.FillColor = Color3.fromRGB(255, 50, 50)
@@ -99,135 +280,93 @@ local function highlightPlayer(data)
     highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
     highlight.Parent = character
 
-    -- Add distance indicator (BillboardGui)
-    local head = character:FindFirstChild("Head")
-    if head then
-        local billboard = Instance.new("BillboardGui")
-        billboard.Name = "DetectionIndicator"
-        billboard.Size = UDim2.new(0, 100, 0, 30)
-        billboard.StudsOffset = Vector3.new(0, 3, 0)
-        billboard.AlwaysOnTop = true
-        billboard.Parent = head
-
-        local distLabel = Instance.new("TextLabel")
-        distLabel.Size = UDim2.new(1, 0, 1, 0)
-        distLabel.BackgroundTransparency = 0.3
-        distLabel.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-        distLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-        distLabel.Text = string.format("%.0fm", data.distance or 0)
-        distLabel.TextSize = 16
-        distLabel.Font = Enum.Font.GothamBold
-        distLabel.Parent = billboard
-
-        local corner = Instance.new("UICorner")
-        corner.CornerRadius = UDim.new(0, 6)
-        corner.Parent = distLabel
-    end
-
-    -- Store for cleanup
     table.insert(activeHighlights, { highlight = highlight, character = character })
 
-    -- Remove after duration
     task.delay(duration, function()
         if highlight and highlight.Parent then
-            -- Fade out
-            local fadeInfo = TweenInfo.new(0.5, Enum.EasingStyle.Linear)
-            local fadeTween = TweenService:Create(highlight, fadeInfo, {
-                FillTransparency = 1,
-                OutlineTransparency = 1,
-            })
-            fadeTween:Play()
-            fadeTween.Completed:Connect(function()
-                highlight:Destroy()
-            end)
-        end
-
-        -- Remove billboard
-        if head then
-            local billboard = head:FindFirstChild("DetectionIndicator")
-            if billboard then billboard:Destroy() end
+            highlight:Destroy()
         end
     end)
 end
 
 ----------------------------------------------------------------------
--- TAGGING
+-- SEEKER BLIND SCREEN
 ----------------------------------------------------------------------
 
-local function attemptTag()
-    if not seekMode then return end
-    if not canTag then return end
+local blindGui = nil
 
-    -- Raycast from camera to find a hider
-    local mousePos = UserInputService:GetMouseLocation()
-    local ray = camera:ViewportPointToRay(mousePos.X, mousePos.Y)
-    local raycastParams = RaycastParams.new()
-    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
-    raycastParams.FilterDescendantsInstances = { player.Character }
+local function showSeekerBlind(show)
+    local gui = player:FindFirstChild("PlayerGui")
+    if not gui then return end
 
-    local result = Workspace:Raycast(ray.Origin, ray.Direction * GameConfig.TagDistance, raycastParams)
+    if show then
+        if not blindGui then
+            blindGui = Instance.new("ScreenGui")
+            blindGui.Name = "SeekerBlind"
+            blindGui.IgnoreGuiInset = true
+            blindGui.DisplayOrder = 100
+            blindGui.Parent = gui
 
-    if result and result.Instance then
-        -- Check if hit part belongs to a player character
-        local hitCharacter = result.Instance:FindFirstAncestorOfClass("Model")
-        if hitCharacter then
-            local targetPlayer = Players:GetPlayerFromCharacter(hitCharacter)
-            if targetPlayer and targetPlayer ~= player then
-                -- Send tag request
-                canTag = false
-                SeekerTag:FireServer(targetPlayer)
+            local frame = Instance.new("Frame")
+            frame.Name = "BlindFrame"
+            frame.Size = UDim2.new(1, 0, 1, 0)
+            frame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+            frame.BackgroundTransparency = 0
+            frame.BorderSizePixel = 0
+            frame.Parent = blindGui
 
-                -- Brief cooldown to prevent spam
-                task.delay(0.5, function()
-                    canTag = true
-                end)
-            end
+            local label = Instance.new("TextLabel")
+            label.Size = UDim2.new(0.6, 0, 0, 60)
+            label.Position = UDim2.new(0.2, 0, 0.45, 0)
+            label.BackgroundTransparency = 1
+            label.TextColor3 = Color3.fromRGB(200, 200, 200)
+            label.Text = "The Chameleons are hiding...\nGet ready to seek!"
+            label.TextSize = 24
+            label.Font = Enum.Font.GothamBold
+            label.Parent = blindGui
+
+            local eye = Instance.new("TextLabel")
+            eye.Name = "Eye"
+            eye.Size = UDim2.new(0, 80, 0, 80)
+            eye.Position = UDim2.new(0.5, -40, 0.3, 0)
+            eye.BackgroundTransparency = 1
+            eye.TextColor3 = Color3.fromRGB(255, 100, 100)
+            eye.Text = "👁"
+            eye.TextSize = 50
+            eye.Parent = blindGui
         end
-    end
-end
-
--- Alternative: proximity-based tag (click on nearby player)
-local function attemptProximityTag()
-    if not seekMode then return end
-    if not canTag then return end
-    if not player.Character then return end
-
-    local rootPart = player.Character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-
-    -- Find closest hider within tag distance
-    local closestPlayer = nil
-    local closestDist = GameConfig.TagDistance
-
-    for _, otherPlayer in ipairs(Players:GetPlayers()) do
-        if otherPlayer ~= player and otherPlayer.Character then
-            local otherRoot = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if otherRoot then
-                local dist = (rootPart.Position - otherRoot.Position).Magnitude
-                if dist < closestDist then
-                    closestDist = dist
-                    closestPlayer = otherPlayer
+    else
+        -- REMOVE the blind screen
+        if blindGui then
+            local frame = blindGui:FindFirstChild("BlindFrame")
+            if frame then
+                TweenService:Create(frame, TweenInfo.new(0.5), {
+                    BackgroundTransparency = 1,
+                }):Play()
+            end
+            task.delay(0.6, function()
+                if blindGui then
+                    blindGui:Destroy()
+                    blindGui = nil
                 end
-            end
+            end)
         end
     end
-
-    if closestPlayer then
-        canTag = false
-        SeekerTag:FireServer(closestPlayer)
-        task.delay(0.5, function()
-            canTag = true
-        end)
-    end
 end
+
 
 ----------------------------------------------------------------------
 -- INPUT HANDLING
 ----------------------------------------------------------------------
 
-local function onInputBegan(input, gameProcessed)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if not seekMode then return end
+
+    -- Left click = SHOOT paint gun
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        shootPaintGun()
+    end
 
     if input.UserInputType == Enum.UserInputType.Keyboard then
         -- X key for detection pulse
@@ -236,22 +375,10 @@ local function onInputBegan(input, gameProcessed)
                 SeekerAbility:FireServer("PULSE")
                 createPulseVisual()
                 pulseCooldown = GameConfig.DetectionPulseCooldown
-            else
-                print("[SeekerClient] Pulse on cooldown:", math.ceil(pulseCooldown), "seconds remaining")
             end
         end
-
-        -- T key for proximity tag
-        if input.KeyCode == Enum.KeyCode.T then
-            attemptProximityTag()
-        end
     end
-
-    -- Left click for raycast tag
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        attemptTag()
-    end
-end
+end)
 
 ----------------------------------------------------------------------
 -- COOLDOWN TIMER
@@ -260,36 +387,25 @@ end
 RunService.Heartbeat:Connect(function(dt)
     if pulseCooldown > 0 then
         pulseCooldown -= dt
-        if pulseCooldown < 0 then
-            pulseCooldown = 0
-        end
+        if pulseCooldown < 0 then pulseCooldown = 0 end
     end
 end)
 
 ----------------------------------------------------------------------
--- SERVER RESPONSE HANDLING
+-- SERVER RESPONSES
 ----------------------------------------------------------------------
 
 SeekerAbility.OnClientEvent:Connect(function(status, data)
     if status == "PULSE_RESULT" then
         local detected = data.detected or 0
         if detected > 0 then
-            print("[SeekerClient] Pulse detected", detected, "hider(s) nearby!")
-        else
-            print("[SeekerClient] Pulse found nothing nearby.")
+            print("[Seeker] Pulse detected", detected, "hider(s)!")
         end
-
     elseif status == "TAG_SUCCESS" then
-        print("[SeekerClient] Successfully tagged", data.targetName, "!")
-        -- Play success sound/effect here
-
-    elseif status == "COOLDOWN" then
-        pulseCooldown = data.remaining or 0
-        print("[SeekerClient] Ability on cooldown:", math.ceil(pulseCooldown), "s")
+        print("[Seeker] HIT!", data.targetName, "eliminated!")
     end
 end)
 
--- Highlight hider when server sends detection data
 HighlightHider.OnClientEvent:Connect(function(data)
     highlightPlayer(data)
 end)
@@ -301,127 +417,39 @@ end)
 RoleAssigned.OnClientEvent:Connect(function(role)
     myRole = role
     seekMode = false
-
-    if role == "Seeker" then
-        print("[SeekerClient] You are a SEEKER! Wait for the seek phase...")
-    end
+    crosshairGui.Enabled = false
 end)
 
 RoundStateChanged.OnClientEvent:Connect(function(state, data)
     if state == "SeekPhase" and myRole == "Seeker" then
+        -- RELEASE THE SEEKER!
         seekMode = true
         pulseCooldown = 0
-        print("[SeekerClient] SEEK PHASE! Controls: LMB=Tag(aim), T=Tag(proximity), X=Detection Pulse")
+        showSeekerBlind(false) -- REMOVE black screen!
+        crosshairGui.Enabled = true -- Show crosshair
+        print("[Seeker] GO! Left-click to shoot paint gun! X = Detection Pulse")
 
     elseif state == "PrepPhase" and myRole == "Seeker" then
-        -- Seeker is blinded during prep
         seekMode = false
-        showSeekerBlind(true)
+        showSeekerBlind(true) -- Show black screen during prep
 
     elseif state == "HidePhase" and myRole == "Seeker" then
-        -- Still blinded during hide phase
         seekMode = false
+        -- Keep blind screen during hide phase (already showing)
 
     elseif state == "Lobby" or state == "Results" then
         seekMode = false
         myRole = nil
         showSeekerBlind(false)
-        -- Clear any active highlights
-        for _, data in ipairs(activeHighlights) do
-            if data.highlight and data.highlight.Parent then
-                data.highlight:Destroy()
+        crosshairGui.Enabled = false
+        -- Clear highlights
+        for _, d in ipairs(activeHighlights) do
+            if d.highlight and d.highlight.Parent then
+                d.highlight:Destroy()
             end
         end
         activeHighlights = {}
     end
 end)
 
-----------------------------------------------------------------------
--- SEEKER BLIND (during prep/hide phases)
-----------------------------------------------------------------------
-
-function showSeekerBlind(show)
-    local gui = player:FindFirstChild("PlayerGui")
-    if not gui then return end
-
-    local blind = gui:FindFirstChild("SeekerBlind")
-
-    if show then
-        if not blind then
-            blind = Instance.new("ScreenGui")
-            blind.Name = "SeekerBlind"
-            blind.IgnoreGuiInset = true
-            blind.DisplayOrder = 100
-            blind.Parent = gui
-
-            local frame = Instance.new("Frame")
-            frame.Size = UDim2.new(1, 0, 1, 0)
-            frame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
-            frame.BackgroundTransparency = 0
-            frame.BorderSizePixel = 0
-            frame.Parent = blind
-
-            local label = Instance.new("TextLabel")
-            label.Size = UDim2.new(0.6, 0, 0, 60)
-            label.Position = UDim2.new(0.2, 0, 0.45, 0)
-            label.BackgroundTransparency = 1
-            label.TextColor3 = Color3.fromRGB(200, 200, 200)
-            label.Text = "The Chameleons are hiding...\nGet ready to seek!"
-            label.TextSize = 24
-            label.Font = Enum.Font.GothamBold
-            label.Parent = blind
-
-            -- Pulsing eye icon
-            local eye = Instance.new("TextLabel")
-            eye.Size = UDim2.new(0, 80, 0, 80)
-            eye.Position = UDim2.new(0.5, -40, 0.3, 0)
-            eye.BackgroundTransparency = 1
-            eye.TextColor3 = Color3.fromRGB(255, 100, 100)
-            eye.Text = "👁"
-            eye.TextSize = 50
-            eye.Parent = blind
-
-            -- Pulse animation
-            task.spawn(function()
-                while blind and blind.Parent do
-                    local tweenIn = TweenService:Create(eye, TweenInfo.new(0.8, Enum.EasingStyle.Sine), {
-                        TextTransparency = 0.5,
-                    })
-                    tweenIn:Play()
-                    tweenIn.Completed:Wait()
-
-                    local tweenOut = TweenService:Create(eye, TweenInfo.new(0.8, Enum.EasingStyle.Sine), {
-                        TextTransparency = 0,
-                    })
-                    tweenOut:Play()
-                    tweenOut.Completed:Wait()
-                end
-            end)
-        end
-    else
-        if blind then
-            -- Fade out
-            local frame = blind:FindFirstChildOfClass("Frame")
-            if frame then
-                local fadeInfo = TweenInfo.new(0.5, Enum.EasingStyle.Linear)
-                local fadeTween = TweenService:Create(frame, fadeInfo, {
-                    BackgroundTransparency = 1,
-                })
-                fadeTween:Play()
-                fadeTween.Completed:Connect(function()
-                    blind:Destroy()
-                end)
-            else
-                blind:Destroy()
-            end
-        end
-    end
-end
-
-----------------------------------------------------------------------
--- CONNECT INPUT
-----------------------------------------------------------------------
-
-UserInputService.InputBegan:Connect(onInputBegan)
-
-print("[SeekerClient] Seeker system loaded. Controls: LMB=Tag(aim), T=Tag(proximity), X=Pulse")
+print("[SeekerClient] Paint gun seeker loaded! LMB=Shoot, X=Pulse")
