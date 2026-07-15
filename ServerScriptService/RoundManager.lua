@@ -419,6 +419,65 @@ function RoundManager.TeleportPlayersToLobby(players)
 end
 
 ----------------------------------------------------------------------
+-- SEEKER VISIBILITY (hide during prep/hide, show during seek)
+----------------------------------------------------------------------
+
+function RoundManager.HideSeekers()
+    for _, seeker in ipairs(RoundManager.Seekers) do
+        if seeker and seeker.Character then
+            local humanoid = seeker.Character:FindFirstChild("Humanoid")
+            local rootPart = seeker.Character:FindFirstChild("HumanoidRootPart")
+            if humanoid then
+                humanoid.WalkSpeed = 0
+                humanoid.JumpPower = 0
+            end
+            if rootPart then
+                rootPart.Anchored = true
+            end
+            -- Make invisible
+            for _, part in ipairs(seeker.Character:GetDescendants()) do
+                if part:IsA("BasePart") then
+                    part.Transparency = 1
+                end
+                if part:IsA("Decal") then
+                    part.Transparency = 1
+                end
+            end
+        end
+    end
+    print("[RoundManager] Seekers hidden during prep/hide phase")
+end
+
+function RoundManager.ReleaseSeekers()
+    -- Teleport seekers to map
+    RoundManager.TeleportPlayersToMap(RoundManager.Seekers)
+
+    for _, seeker in ipairs(RoundManager.Seekers) do
+        if seeker and seeker.Character then
+            local humanoid = seeker.Character:FindFirstChild("Humanoid")
+            local rootPart = seeker.Character:FindFirstChild("HumanoidRootPart")
+            if humanoid then
+                humanoid.WalkSpeed = 16
+                humanoid.JumpPower = 50
+            end
+            if rootPart then
+                rootPart.Anchored = false
+            end
+            -- Make visible again
+            for _, part in ipairs(seeker.Character:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.Transparency = 0
+                end
+                if part:IsA("Decal") then
+                    part.Transparency = 0
+                end
+            end
+        end
+    end
+    print("[RoundManager] Seekers released! Hunt begins!")
+end
+
+----------------------------------------------------------------------
 -- MAIN GAME LOOP
 ----------------------------------------------------------------------
 
@@ -441,10 +500,7 @@ function RoundManager.StartGameLoop()
 
             -- LOAD MAP
             RoundManager.LoadMap(chosenMap)
-
-            -- Teleport players to map
-            RoundManager.TeleportPlayersToMap(players)
-            task.wait(1) -- Brief pause after teleport
+            task.wait(1) -- Brief pause after loading
 
             -- ASSIGN ROLES
             RoundManager.AssignRoles(players)
@@ -453,20 +509,27 @@ function RoundManager.StartGameLoop()
             DummyCharacter.TransformHiders(RoundManager.Hiders)
             task.wait(0.5) -- Brief pause for transformation
 
-            -- PREP PHASE - Hiders paint themselves
+            -- Only teleport HIDERS to map (seekers stay hidden)
+            RoundManager.TeleportPlayersToMap(RoundManager.Hiders)
+
+            -- Hide seekers (make them invisible and anchored)
+            RoundManager.HideSeekers()
+
+            -- PREP PHASE - Hiders paint themselves (seekers blinded)
             RoundManager.PrepPhase(players)
 
-            -- HIDE PHASE - Hiders find a spot, seekers still blinded
+            -- HIDE PHASE - Hiders find a spot (seekers still hidden)
             RoundManager.HidePhase()
 
-            -- SEEK PHASE - Seekers released, hunt for hiders
+            -- SEEK PHASE - NOW teleport seekers to map and make them visible!
+            RoundManager.ReleaseSeekers()
             RoundManager.SeekPhase()
 
             -- RESULTS PHASE - Show scores and winners
             RoundManager.ResultsPhase()
 
             -- CLEANUP - Unload map and teleport back to lobby
-            DummyCharacter.RestoreAll() -- Restore player appearances
+            DummyCharacter.RestoreAll()
             RoundManager.UnloadMap()
             RoundManager.TeleportPlayersToLobby(Players:GetPlayers())
 
