@@ -375,7 +375,7 @@ GetPlayerScore.OnServerInvoke = function(player)
 end
 
 ----------------------------------------------------------------------
--- PLAYER CONNECTIONS
+-- PLAYER CONNECTIONS (called automatically when module loads)
 ----------------------------------------------------------------------
 
 Players.PlayerAdded:Connect(function(player)
@@ -388,11 +388,13 @@ Players.PlayerRemoving:Connect(function(player)
     ScoringServer.PlayerData[player] = nil
 end)
 
--- Load data for players already in game (in case script loads late)
+-- Load data for players already in game (in case module loads late)
 for _, player in ipairs(Players:GetPlayers()) do
-    task.spawn(function()
-        ScoringServer.LoadPlayerData(player)
-    end)
+    if not ScoringServer.PlayerData[player] then
+        task.spawn(function()
+            ScoringServer.LoadPlayerData(player)
+        end)
+    end
 end
 
 -- Auto-save every 5 minutes
@@ -412,5 +414,7 @@ game:BindToClose(function()
         ScoringServer.SavePlayerData(player)
     end
 end)
+
+print("[ScoringServer] Scoring system loaded - DataStore saving enabled")
 
 return ScoringServer

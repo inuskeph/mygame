@@ -16,6 +16,7 @@ local VoteSystem = require(script.Parent:WaitForChild("VoteSystem"))
 local MapGenerator = require(script.Parent:WaitForChild("MapGenerator"))
 local DummyCharacter = require(script.Parent:WaitForChild("DummyCharacter"))
 local PaintServer = require(script.Parent:WaitForChild("PaintServer"))
+local ScoringServer = require(script.Parent:WaitForChild("ScoringServer"))
 
 -- Wait for events to be initialized
 local Events = ReplicatedStorage:WaitForChild("Events")
@@ -146,7 +147,7 @@ function RoundManager.AssignRoles(players)
 end
 
 ----------------------------------------------------------------------
--- SCORING
+-- SCORING (uses ScoringServer for persistence)
 ----------------------------------------------------------------------
 
 function RoundManager.InitScores(players)
@@ -158,13 +159,18 @@ function RoundManager.InitScores(players)
 end
 
 function RoundManager.AwardPoints(player, amount, reason)
+    if not player or not player.Parent then return end
+    if amount <= 0 then return end
+
+    -- Track in RoundManager for leaderboard
     if not RoundManager.PlayerScores[player] then
         RoundManager.PlayerScores[player] = { points = 0, coins = 0 }
     end
     RoundManager.PlayerScores[player].points += amount
     RoundManager.PlayerScores[player].coins += math.floor(amount * GameConfig.CoinsPerPoint)
 
-    ScoreUpdate:FireClient(player, RoundManager.PlayerScores[player], reason or "")
+    -- ALSO award via ScoringServer (saves to DataStore + updates leaderstats)
+    ScoringServer.AwardPoints(player, amount, reason)
 end
 
 function RoundManager.GetLeaderboard()
